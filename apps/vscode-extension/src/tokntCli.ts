@@ -10,6 +10,8 @@ export interface TokntStats {
   reductionPercent: number;
   compressedOutputs: number;
   recalledOutputs: number;
+  toolCallsTracked?: number;
+  opportunitySavedTokens?: number;
   updatedAt: string;
 }
 

@@ -192,9 +192,10 @@ async function installCursorPlugin(cursorDir: string): Promise<void> {
 function buildPostToolUseHook(adaptersEntry: string): string {
   return `#!/usr/bin/env node
 /**
- * postToolUse: only rewrite MCP tool payloads (Cursor can replace those).
- * Do not process ordinary tools here — that inflated stats without changing
- * what the model sees. Shell savings come from toknt-shell-wrap via preToolUse.
+ * Track every Agent tool call in real time.
+ * - MCP: deliver compressed output to the model (Cursor allows rewrite)
+ * - Everything else: observe + record opportunity (Cursor cannot strip Read/Grep/…)
+ * Shell *delivered* savings come from toknt-shell-wrap (preToolUse).
  */
 import { pathToFileURL } from 'node:url';
 
@@ -215,6 +216,7 @@ function extractContent(toolOutput) {
         if (typeof parsed.stdout === 'string') return parsed.stdout;
         if (typeof parsed.output === 'string') return parsed.output;
         if (typeof parsed.content === 'string') return parsed.content;
+        if (typeof parsed.result === 'string') return parsed.result;
       }
     } catch {
       return toolOutput;
@@ -241,39 +243,50 @@ try {
   const toolName = event.tool_name ?? event.toolName ?? event.tool ?? 'unknown';
   const isMcp =
     typeof event.mcp_server_name === 'string' || String(toolName).startsWith('MCP:');
-
-  if (!isMcp) {
-    process.stdout.write('{}\\n');
-    process.exit(0);
-  }
-
   const content = extractContent(event.tool_output ?? event.output);
-  if (!content) {
-    process.stdout.write('{}\\n');
-    process.exit(0);
-  }
 
   const { OptimizingAdapterWrapper } = await import(pathToFileURL(adaptersEntry).href);
   const wrapper = new OptimizingAdapterWrapper();
-  const optimized = await wrapper.processToolOutput({
-    toolName,
-    content,
-    path: event.tool_input?.path ?? event.path,
-    metadata: event.metadata,
-  });
 
-  if (!optimized.metadata?.toknt?.optimized) {
+  // Already compressed by shell-wrap — do not double-count.
+  if (
+    content.includes('Full output stored locally.') ||
+    content.includes('[UNCHANGED FILE]') ||
+    content.startsWith('TEST RESULT')
+  ) {
     process.stdout.write('{}\\n');
     process.exit(0);
   }
 
-  let updated;
-  try {
-    updated = JSON.parse(optimized.content);
-  } catch {
-    updated = { content: optimized.content, toknt: optimized.metadata.toknt };
+  if (!content) {
+    await wrapper.trackToolCall(toolName);
+    process.stdout.write('{}\\n');
+    process.exit(0);
   }
-  process.stdout.write(JSON.stringify({ updated_mcp_tool_output: updated }) + '\\n');
+
+  const path =
+    event.tool_input?.path ??
+    event.tool_input?.file_path ??
+    event.path ??
+    event.file_path;
+
+  const optimized = await wrapper.processToolOutput(
+    { toolName, content, path, metadata: event.metadata },
+    isMcp ? 'deliver' : 'observe'
+  );
+
+  if (isMcp && optimized.metadata?.toknt?.optimized) {
+    let updated;
+    try {
+      updated = JSON.parse(optimized.content);
+    } catch {
+      updated = { content: optimized.content, toknt: optimized.metadata.toknt };
+    }
+    process.stdout.write(JSON.stringify({ updated_mcp_tool_output: updated }) + '\\n');
+    process.exit(0);
+  }
+
+  process.stdout.write('{}\\n');
 } catch (err) {
   process.stderr.write('[toknt] postToolUse hook error: ' + (err?.message ?? err) + '\\n');
   process.stdout.write('{}\\n');
@@ -284,8 +297,8 @@ try {
 function buildPreToolUseHook(shellWrapPath: string): string {
   return `#!/usr/bin/env node
 /**
- * Wrap only heavy test/build Shell commands. Pass command as a single --cmd argv
- * so # comments / newlines cannot break the wrap (unlike \`node wrap -- \$cmd\`).
+ * Wrap Shell commands (balanced/aggressive) so stdout can be compressed before
+ * the model sees it. Pass command via --cmd (single argv) for safety.
  */
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -303,7 +316,13 @@ async function readStdin() {
 function shouldWrap(command) {
   if (!command || typeof command !== 'string') return false;
   if (command.includes('toknt-shell-wrap')) return false;
-  // Only known noisy test/build runners — never wrap arbitrary shell.
+  if (command.includes('<<') || /[\\r\\n]/.test(command)) return false;
+  if (command.includes('$(') || command.includes(String.fromCharCode(96))) return false;
+  const interactive =
+    /\\b(vim|nvim|nano|less|more|top|htop|ssh|scp|sftp|mysql|psql|redis-cli|python -i|node -i|gdb|lldb)\\b/i;
+  if (interactive.test(command)) return false;
+  // Deliver compression only for known large log producers. All other tools are
+  // still tracked via postToolUse (observe) for live counters.
   return /\\b(npm\\s+test|npm\\s+run\\s+test|npx\\s+vitest|npx\\s+jest|yarn\\s+test|pnpm\\s+test|pytest|python\\s+-m\\s+pytest|cargo\\s+test|go\\s+test|mvn\\s+test|gradlew?\\s+test|ctest)\\b/i.test(
     command
   );
@@ -358,8 +377,7 @@ try {
 function buildShellWrapHook(adaptersEntry: string): string {
   return `#!/usr/bin/env node
 /**
- * Runs a shell command from --cmd and prints optimized stdout when safe.
- * Always fail-open: on any error, still try to run the original command.
+ * Runs a shell command from --cmd and prints optimized stdout when compression applies.
  */
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
@@ -376,7 +394,7 @@ function getCmd() {
 
 const command = getCmd();
 if (!command) {
-  process.stderr.write('[toknt] shell-wrap: missing --cmd; pass-through impossible\\n');
+  process.stderr.write('[toknt] shell-wrap: missing --cmd\\n');
   process.exit(0);
 }
 
@@ -402,13 +420,11 @@ const combined = stderr ? stdout + (stdout ? '\\n' : '') + stderr : stdout;
 try {
   const { OptimizingAdapterWrapper } = await import(pathToFileURL(adaptersEntry).href);
   const wrapper = new OptimizingAdapterWrapper();
-  const optimized = await wrapper.processToolOutput({
-    toolName: 'Shell',
-    content: combined,
-  });
-  const meta = optimized.metadata?.toknt;
-  // Only replace when we clearly compressed terminal/test output
-  if (meta?.optimized && meta.strategy === 'terminal_output') {
+  const optimized = await wrapper.processToolOutput(
+    { toolName: 'Shell', content: combined },
+    'deliver'
+  );
+  if (optimized.metadata?.toknt?.optimized) {
     process.stdout.write(optimized.content);
     if (!optimized.content.endsWith('\\n')) process.stdout.write('\\n');
   } else {

@@ -39,7 +39,8 @@ program
   .description('Show token savings statistics')
   .option('--json', 'Output JSON')
   .option('--reset', 'Reset accumulated statistics')
-  .action((options: { json?: boolean; reset?: boolean }) => statsCommand(options));
+  .option('--watch', 'Live-updating savings view')
+  .action((options: { json?: boolean; reset?: boolean; watch?: boolean }) => statsCommand(options));
 program.command('explain').description('Explain how Tokn\'t works').action(explainCommand);
 program
   .command('benchmark')

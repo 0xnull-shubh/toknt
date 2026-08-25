@@ -16,6 +16,8 @@ export async function statusCommand(): Promise<void> {
   console.log(`  Cache entries: ${stats.entries}`);
   console.log(`  Cache size:    ${(stats.sizeBytes / 1024).toFixed(1)} KB`);
   console.log(`  Tokens saved:  ${formatTokenCount(tokStats.savedTokens)} (${tokStats.reductionPercent}%)`);
+  console.log(`  Tool calls:    ${tokStats.toolCallsTracked}`);
+  console.log(`  Opportunity:   ${formatTokenCount(tokStats.opportunitySavedTokens)}`);
   console.log(`  Compressed:    ${tokStats.compressedOutputs}`);
   console.log(`  Recalled:      ${tokStats.recalledOutputs}\n`);
 
@@ -30,9 +32,9 @@ export async function statusCommand(): Promise<void> {
     console.log(`  ${agent.name.padEnd(14)} ${status}`);
   }
 
-  if (tokStats.compressedOutputs === 0) {
-    console.log('\n  No compressions yet. After install, restart Cursor, then run agent');
-    console.log('  tool calls (e.g. large Shell output in balanced mode).\n');
+  if (tokStats.toolCallsTracked === 0) {
+    console.log('\n  No Agent tool calls tracked yet. Use Cursor Agent (not Ask-only),');
+    console.log('  then run: toknt stats --watch\n');
   } else {
     console.log();
   }

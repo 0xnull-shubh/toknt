@@ -3,56 +3,49 @@
 ## Install
 
 ```bash
-# From a local checkout
 npm install && npm run build
-npm link -w toknt   # optional: puts \`toknt\` on your PATH
+npm link -w toknt   # optional: puts toknt on your PATH
 toknt install cursor
+toknt config set mode balanced
 ```
 
-This does three things:
+Restart Cursor after install.
 
-1. Writes hook scripts under `~/.cursor/toknt/hooks/`
-2. Registers them in **`~/.cursor/hooks.json`** (`postToolUse` + Shell `preToolUse`)
-3. Copies the bundled plugin to `~/.cursor/plugins/toknt`
+## What Tokn't can do in Cursor
 
-Restart Cursor (or wait for hooks reload) after install.
+Cursor’s hooks API only lets us **rewrite** some outputs:
 
-## How It Works
+| Path | Tracks live? | Saves tokens for the model? |
+|------|--------------|-------------------------------|
+| Shell (Agent) | Yes | **Yes** in `balanced`/`aggressive` via wrap |
+| MCP tools | Yes | **Yes** when compressible |
+| Read / Grep / etc. | Yes | **No** (Cursor cannot strip these yet) — counted as *opportunity* |
 
-Cursor hooks use the native stdin/stdout JSON protocol:
+## Live savings
+
+```bash
+toknt stats          # snapshot
+toknt stats --watch  # real-time dashboard
+toknt status         # includes tool-call counters
+```
+
+VS Code / Cursor status bar (extension) also polls saved tokens.
+
+## Hooks installed
 
 | Hook | Behavior |
 |------|----------|
-| `preToolUse` (Shell) | Wraps known test runners (`npm test`, `pytest`, `vitest`, …) in `balanced`/`aggressive` via `--cmd`; **this is what actually saves tokens and updates stats** |
-| `postToolUse` | Rewrites model-visible output only for MCP tools |
+| `preToolUse` (Shell) | Wraps non-interactive Shell commands (`--cmd`) so large output can be compressed before the model sees it |
+| `postToolUse` | Tracks **every** tool call; delivers rewrites for MCP; records opportunity on Read/etc. |
 
-Original content stays in `~/.toknt/` and can be recalled via `toknt://` URIs.
+Files:
 
-## Plugin
-
-The Cursor plugin at `plugins/cursor/` (copied on install) includes:
-
-- **Hooks** — reference scripts (runtime hooks come from `toknt install`)
-- **Skills** — `toknt-optimize` for recall commands
-- **Rules** — `toknt-recall` for compressed content handling
-
-## Verify
-
-```bash
-toknt status
-toknt doctor
-```
-
-Look for:
-
-- `Cursor integration: Active`
-- `Cursor hooks.json: Tokn't postToolUse/preToolUse registered`
-- `Cursor plugin: ~/.cursor/plugins/toknt`
+- `~/.cursor/hooks.json`
+- `~/.cursor/hooks/toknt-*.mjs`
+- `~/.toknt/stats.json`, `live.json`, `activity.jsonl`
 
 ## Uninstall
 
 ```bash
 toknt uninstall
 ```
-
-Removes `~/.cursor/toknt/`, Tokn't entries from `hooks.json`, and `~/.cursor/plugins/toknt`.
