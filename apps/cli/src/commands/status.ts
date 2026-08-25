@@ -17,6 +17,7 @@ export async function statusCommand(): Promise<void> {
   console.log(`  Cache size:    ${(stats.sizeBytes / 1024).toFixed(1)} KB`);
   console.log(`  Tokens saved:  ${formatTokenCount(tokStats.savedTokens)} (${tokStats.reductionPercent}%)`);
   console.log(`  Tool calls:    ${tokStats.toolCallsTracked}`);
+  console.log(`  Tokens scanned:${formatTokenCount(tokStats.tokensScanned ?? 0)}`);
   console.log(`  Opportunity:   ${formatTokenCount(tokStats.opportunitySavedTokens)}`);
   console.log(`  Compressed:    ${tokStats.compressedOutputs}`);
   console.log(`  Recalled:      ${tokStats.recalledOutputs}\n`);

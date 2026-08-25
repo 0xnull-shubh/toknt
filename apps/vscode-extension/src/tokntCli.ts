@@ -11,6 +11,7 @@ export interface TokntStats {
   compressedOutputs: number;
   recalledOutputs: number;
   toolCallsTracked?: number;
+  tokensScanned?: number;
   opportunitySavedTokens?: number;
   updatedAt: string;
 }

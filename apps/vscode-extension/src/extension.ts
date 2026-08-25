@@ -42,6 +42,7 @@ async function updateStatusBar(): Promise<void> {
       `Mode: ${mode}`,
       `Delivered saved: ${formatTokenCount(stats.savedTokens)} (${stats.reductionPercent}%)`,
       `Tool calls tracked: ${stats.toolCallsTracked ?? 0}`,
+      `Tokens scanned: ${formatTokenCount(stats.tokensScanned ?? 0)}`,
       `Opportunity (not deliverable): ${formatTokenCount(stats.opportunitySavedTokens ?? 0)}`,
       `Compressed: ${stats.compressedOutputs} · Recalled: ${stats.recalledOutputs}`,
       '',

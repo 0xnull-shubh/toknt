@@ -1,13 +1,22 @@
+import { watch } from 'node:fs';
+import { join } from 'node:path';
 import { getCache } from '../utils.js';
 import { StatsStore } from '@toknt/cache';
 import { formatTokenCount } from '@toknt/tokenizer';
 
-function printStats(stats: Awaited<ReturnType<StatsStore['load']>>, recent: Awaited<ReturnType<StatsStore['recentActivity']>>): void {
-  console.log('Tokn\'t live savings (Cursor Agent)\n');
+function printStats(
+  stats: Awaited<ReturnType<StatsStore['load']>>,
+  recent: Awaited<ReturnType<StatsStore['recentActivity']>>,
+  meta?: { refreshedAt: Date; reason: string }
+): void {
+  console.log("Tokn't live savings (Cursor Agent)\n");
   console.log(`  Delivered saved:   ${formatTokenCount(stats.savedTokens)} (${stats.reductionPercent}%)`);
   console.log(`  Delivered comps:   ${stats.compressedOutputs}`);
   console.log(`  Tool calls seen:   ${stats.toolCallsTracked}`);
-  console.log(`  Opportunity:       ${formatTokenCount(stats.opportunitySavedTokens)} detected (not deliverable via Cursor hooks)`);
+  console.log(`  Tokens scanned:    ${formatTokenCount(stats.tokensScanned ?? 0)}`);
+  console.log(
+    `  Opportunity:       ${formatTokenCount(stats.opportunitySavedTokens)} detected (not deliverable via Cursor hooks)`
+  );
   if (stats.lastTool) {
     console.log(
       `  Last event:        ${stats.lastTool} · saved ${formatTokenCount(stats.lastSavedTokens ?? 0)}` +
@@ -27,7 +36,12 @@ function printStats(stats: Awaited<ReturnType<StatsStore['load']>>, recent: Awai
   }
   console.log('  Delivered = model actually got less context (Shell wrap / MCP).');
   console.log('  Opportunity = waste Tokn\'t saw on Read/etc. (Cursor cannot strip those yet).');
-  console.log('  Live view: toknt stats --watch   ·   Reset: toknt stats --reset\n');
+  console.log('  Live view: toknt stats --watch   ·   Reset: toknt stats --reset');
+  if (meta) {
+    console.log(`\n  Watching ~/.toknt — ${meta.refreshedAt.toLocaleTimeString()} · ${meta.reason} (Ctrl+C to stop)`);
+  } else {
+    console.log();
+  }
 }
 
 export async function statsCommand(options?: {
@@ -49,24 +63,54 @@ export async function statsCommand(options?: {
   }
 
   if (options?.watch) {
-    const render = async () => {
-      const stats = await store.load();
-      const recent = await store.recentActivity(8);
-      // clear screen
-      process.stdout.write('\x1Bc');
-      printStats(stats, recent);
-      console.log(`  Watching ~/.toknt — ${new Date().toLocaleTimeString()} (Ctrl+C to stop)`);
+    let rendering = false;
+    let pendingReason = 'start';
+
+    const render = async (reason: string) => {
+      pendingReason = reason;
+      if (rendering) return;
+      rendering = true;
+      try {
+        while (true) {
+          const why = pendingReason;
+          pendingReason = '';
+          const stats = await store.load();
+          const recent = await store.recentActivity(8);
+          process.stdout.write('\x1b[H\x1b[2J');
+          printStats(stats, recent, { refreshedAt: new Date(), reason: why || 'poll' });
+          if (!pendingReason) break;
+        }
+      } finally {
+        rendering = false;
+      }
     };
-    await render();
+
+    await render('start');
+
+    const base = cache.getBaseDir();
+    const watchers = ['stats.json', 'live.json', 'activity.jsonl'].map((name) => {
+      try {
+        return watch(join(base, name), () => {
+          void render(`update:${name}`);
+        });
+      } catch {
+        return null;
+      }
+    });
+
     const timer = setInterval(() => {
-      void render();
-    }, 1000);
+      void render('poll');
+    }, 2000);
+
     await new Promise<void>((resolve) => {
-      process.on('SIGINT', () => {
+      const stop = () => {
         clearInterval(timer);
+        for (const w of watchers) w?.close();
         console.log('\n');
         resolve();
-      });
+      };
+      process.on('SIGINT', stop);
+      process.on('SIGTERM', stop);
     });
     return;
   }

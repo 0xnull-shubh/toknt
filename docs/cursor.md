@@ -35,7 +35,7 @@ VS Code / Cursor status bar (extension) also polls saved tokens.
 
 | Hook | Behavior |
 |------|----------|
-| `preToolUse` (Shell) | Wraps non-interactive Shell commands (`--cmd`) so large output can be compressed before the model sees it |
+| `preToolUse` (Shell) | Wraps known test runners (`npm test`, `pytest`, …) so large stdout can be compressed before the model sees it |
 | `postToolUse` | Tracks **every** tool call; delivers rewrites for MCP; records opportunity on Read/etc. |
 
 Files:
