@@ -38,7 +38,8 @@ program
   .command('stats')
   .description('Show token savings statistics')
   .option('--json', 'Output JSON')
-  .action((options: { json?: boolean }) => statsCommand(options));
+  .option('--reset', 'Reset accumulated statistics')
+  .action((options: { json?: boolean; reset?: boolean }) => statsCommand(options));
 program.command('explain').description('Explain how Tokn\'t works').action(explainCommand);
 program
   .command('benchmark')

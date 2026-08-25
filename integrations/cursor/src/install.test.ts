@@ -35,14 +35,11 @@ describe('CursorAdapter.install', () => {
     expect(hooks.hooks.preToolUse?.some((h: { command: string }) => h.command.includes('toknt-'))).toBe(
       true
     );
-    expect(
-      hooks.hooks.afterShellExecution?.some((h: { command: string }) => h.command.includes('toknt-'))
-    ).toBe(true);
+    expect(hooks.hooks.afterShellExecution ?? []).toHaveLength(0);
 
     await access(join(tmpHome, '.cursor', 'hooks', 'toknt-post-tool-use.mjs'));
     await access(join(tmpHome, '.cursor', 'hooks', 'toknt-pre-tool-use.mjs'));
     await access(join(tmpHome, '.cursor', 'hooks', 'toknt-shell-wrap.mjs'));
-    await access(join(tmpHome, '.cursor', 'hooks', 'toknt-after-shell.mjs'));
     await access(join(tmpHome, '.cursor', 'plugins', 'toknt', 'toknt-plugin.json'));
 
     const tokntJson = JSON.parse(

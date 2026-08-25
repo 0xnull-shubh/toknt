@@ -64,4 +64,10 @@ export class StatsStore {
     await this.save(stats);
     return stats;
   }
+
+  async reset(): Promise<PersistedStats> {
+    const stats: PersistedStats = { ...EMPTY_STATS, updatedAt: new Date().toISOString() };
+    await this.save(stats);
+    return stats;
+  }
 }

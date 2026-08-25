@@ -23,9 +23,8 @@ Cursor hooks use the native stdin/stdout JSON protocol:
 
 | Hook | Behavior |
 |------|----------|
-| `preToolUse` (Shell) | Only wraps known test runners (`npm test`, `pytest`, `vitest`, …) in `balanced`/`aggressive`, via a safe `--cmd` argv |
-| `afterShellExecution` | Quietly updates cache/stats from shell output in every Agent chat (does not change what the model sees) |
-| `postToolUse` | Quiet cache/stats; rewrites model-visible output only for MCP |
+| `preToolUse` (Shell) | Wraps known test runners (`npm test`, `pytest`, `vitest`, …) in `balanced`/`aggressive` via `--cmd`; **this is what actually saves tokens and updates stats** |
+| `postToolUse` | Rewrites model-visible output only for MCP tools |
 
 Original content stays in `~/.toknt/` and can be recalled via `toknt://` URIs.
 

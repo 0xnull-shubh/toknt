@@ -54,13 +54,12 @@ export class CursorAdapter extends BaseAdapter {
     const postPath = join(userHooksDir, 'toknt-post-tool-use.mjs');
     const prePath = join(userHooksDir, 'toknt-pre-tool-use.mjs');
     const wrapPath = join(userHooksDir, 'toknt-shell-wrap.mjs');
-    const afterShellPath = join(userHooksDir, 'toknt-after-shell.mjs');
 
     await writeFile(postPath, buildPostToolUseHook(adaptersEntry), { mode: 0o755 });
     await writeFile(prePath, buildPreToolUseHook(wrapPath), { mode: 0o755 });
     await writeFile(wrapPath, buildShellWrapHook(adaptersEntry), { mode: 0o755 });
-    await writeFile(afterShellPath, buildAfterShellHook(adaptersEntry), { mode: 0o755 });
-    await Promise.all([postPath, prePath, wrapPath, afterShellPath].map((p) => chmod(p, 0o755)));
+    await Promise.all([postPath, prePath, wrapPath].map((p) => chmod(p, 0o755)));
+    await rm(join(userHooksDir, 'toknt-after-shell.mjs'), { force: true });
 
     // Keep a copy under ~/.cursor/toknt for doctor/status detection + metadata
     await writeFile(
@@ -72,7 +71,6 @@ export class CursorAdapter extends BaseAdapter {
           hooks: {
             postToolUse: './hooks/toknt-post-tool-use.mjs',
             preToolUse: './hooks/toknt-pre-tool-use.mjs',
-            afterShellExecution: './hooks/toknt-after-shell.mjs',
           },
           adaptersEntry,
         },
@@ -85,7 +83,6 @@ export class CursorAdapter extends BaseAdapter {
     await mergeCursorHooksJson(cursorDir, {
       postToolUse: './hooks/toknt-post-tool-use.mjs',
       preToolUse: './hooks/toknt-pre-tool-use.mjs',
-      afterShellExecution: './hooks/toknt-after-shell.mjs',
     });
 
     await installCursorPlugin(cursorDir);
@@ -118,7 +115,7 @@ export class CursorAdapter extends BaseAdapter {
 
 async function mergeCursorHooksJson(
   cursorDir: string,
-  commands: { postToolUse: string; preToolUse: string; afterShellExecution: string }
+  commands: { postToolUse: string; preToolUse: string }
 ): Promise<void> {
   const hooksPath = join(cursorDir, 'hooks.json');
   let config: { version: number; hooks: Record<string, Array<{ command: string; matcher?: string }>> } = {
@@ -142,10 +139,11 @@ async function mergeCursorHooksJson(
     ...stripToknt(config.hooks.preToolUse),
     { command: commands.preToolUse, matcher: 'Shell' },
   ];
-  config.hooks.afterShellExecution = [
-    ...stripToknt(config.hooks.afterShellExecution),
-    { command: commands.afterShellExecution },
-  ];
+  // Drop legacy observational afterShell hook (it inflated stats without saving tokens).
+  if (config.hooks.afterShellExecution) {
+    config.hooks.afterShellExecution = stripToknt(config.hooks.afterShellExecution);
+    if (config.hooks.afterShellExecution.length === 0) delete config.hooks.afterShellExecution;
+  }
 
   await writeFile(hooksPath, `${JSON.stringify(config, null, 2)}\n`);
 }
@@ -194,13 +192,13 @@ async function installCursorPlugin(cursorDir: string): Promise<void> {
 function buildPostToolUseHook(adaptersEntry: string): string {
   return `#!/usr/bin/env node
 /**
- * Quiet postToolUse: cache/stats only. Rewrite model output only for MCP.
+ * postToolUse: only rewrite MCP tool payloads (Cursor can replace those).
+ * Do not process ordinary tools here — that inflated stats without changing
+ * what the model sees. Shell savings come from toknt-shell-wrap via preToolUse.
  */
 import { pathToFileURL } from 'node:url';
 
 const adaptersEntry = ${JSON.stringify(adaptersEntry)};
-const { OptimizingAdapterWrapper } = await import(pathToFileURL(adaptersEntry).href);
-const wrapper = new OptimizingAdapterWrapper();
 
 async function readStdin() {
   const chunks = [];
@@ -241,50 +239,41 @@ try {
 
   const event = JSON.parse(raw);
   const toolName = event.tool_name ?? event.toolName ?? event.tool ?? 'unknown';
+  const isMcp =
+    typeof event.mcp_server_name === 'string' || String(toolName).startsWith('MCP:');
+
+  if (!isMcp) {
+    process.stdout.write('{}\\n');
+    process.exit(0);
+  }
+
   const content = extractContent(event.tool_output ?? event.output);
   if (!content) {
     process.stdout.write('{}\\n');
     process.exit(0);
   }
 
-  if (
-    content.includes('Full output stored locally.') ||
-    content.includes('[UNCHANGED FILE]') ||
-    content.startsWith('TEST RESULT')
-  ) {
+  const { OptimizingAdapterWrapper } = await import(pathToFileURL(adaptersEntry).href);
+  const wrapper = new OptimizingAdapterWrapper();
+  const optimized = await wrapper.processToolOutput({
+    toolName,
+    content,
+    path: event.tool_input?.path ?? event.path,
+    metadata: event.metadata,
+  });
+
+  if (!optimized.metadata?.toknt?.optimized) {
     process.stdout.write('{}\\n');
     process.exit(0);
   }
 
-  const path =
-    event.tool_input?.path ??
-    event.tool_input?.file_path ??
-    event.path ??
-    event.file_path;
-
-  const optimized = await wrapper.processToolOutput({
-    toolName,
-    content,
-    path,
-    metadata: event.metadata,
-  });
-
-  const meta = optimized.metadata?.toknt;
-  const isMcp =
-    typeof event.mcp_server_name === 'string' || String(toolName).startsWith('MCP:');
-
-  if (meta?.optimized && isMcp) {
-    let updated;
-    try {
-      updated = JSON.parse(optimized.content);
-    } catch {
-      updated = { content: optimized.content, toknt: meta };
-    }
-    process.stdout.write(JSON.stringify({ updated_mcp_tool_output: updated }) + '\\n');
-    process.exit(0);
+  let updated;
+  try {
+    updated = JSON.parse(optimized.content);
+  } catch {
+    updated = { content: optimized.content, toknt: optimized.metadata.toknt };
   }
-
-  process.stdout.write('{}\\n');
+  process.stdout.write(JSON.stringify({ updated_mcp_tool_output: updated }) + '\\n');
 } catch (err) {
   process.stderr.write('[toknt] postToolUse hook error: ' + (err?.message ?? err) + '\\n');
   process.stdout.write('{}\\n');
@@ -430,41 +419,6 @@ try {
 }
 
 process.exit(code);
-`;
-}
-
-function buildAfterShellHook(adaptersEntry: string): string {
-  return `#!/usr/bin/env node
-/**
- * Observational afterShellExecution: update cache/stats without changing output.
- * Works in every Agent chat so toknt stats move even when Shell wrap does not.
- */
-import { pathToFileURL } from 'node:url';
-
-const adaptersEntry = ${JSON.stringify(adaptersEntry)};
-const { OptimizingAdapterWrapper } = await import(pathToFileURL(adaptersEntry).href);
-const wrapper = new OptimizingAdapterWrapper();
-
-async function readStdin() {
-  const chunks = [];
-  for await (const chunk of process.stdin) chunks.push(chunk);
-  return Buffer.concat(chunks).toString('utf8');
-}
-
-try {
-  const raw = await readStdin();
-  if (!raw.trim()) process.exit(0);
-  const event = JSON.parse(raw);
-  const content = typeof event.output === 'string' ? event.output : '';
-  if (!content || content.length < 500) process.exit(0);
-  if (content.includes('Full output stored locally.') || content.includes('[UNCHANGED FILE]')) {
-    process.exit(0);
-  }
-  await wrapper.processToolOutput({ toolName: 'Shell', content });
-} catch (err) {
-  process.stderr.write('[toknt] afterShell hook error: ' + (err?.message ?? err) + '\\n');
-}
-process.exit(0);
 `;
 }
 
