@@ -1,4 +1,4 @@
-import { TokntEngine, detectContextType, type ContextItem } from '@toknt/core';
+import { TokntEngine, detectContextType, type ContextItem, type OptimizationMode } from '@toknt/core';
 import { LocalCache, StatsStore } from '@toknt/cache';
 import { estimateTokens } from '@toknt/tokenizer';
 import type { AgentAdapter, ToolInput, ToolOutput } from './types.js';
@@ -8,19 +8,32 @@ export class OptimizingAdapterWrapper {
   private engine: TokntEngine;
   private cache: LocalCache;
   private statsStore: StatsStore;
+  private fixedMode?: OptimizationMode;
 
-  constructor(cache?: LocalCache, mode?: 'safe' | 'balanced' | 'aggressive') {
+  constructor(cache?: LocalCache, mode?: OptimizationMode) {
     const c = cache ?? new LocalCache();
     this.cache = c;
     this.statsStore = new StatsStore(c.getBaseDir());
-    this.engine = new TokntEngine({ cache: c, mode });
+    this.fixedMode = mode;
+    this.engine = new TokntEngine({ cache: c, mode: mode ?? 'safe' });
   }
 
   getEngine(): TokntEngine {
     return this.engine;
   }
 
+  /** When mode isn't fixed at construct time, follow ~/.toknt/config.json. */
+  private async ensureMode(): Promise<void> {
+    if (this.fixedMode) return;
+    const { mode } = await this.cache.getConfig();
+    if (mode !== this.engine.mode) {
+      this.engine = new TokntEngine({ cache: this.cache, mode });
+    }
+  }
+
   async processToolOutput(output: ToolOutput): Promise<ToolOutput> {
+    await this.ensureMode();
+
     const type = detectContextType(output.toolName, output.content, {
       path: output.path,
       ...output.metadata,
