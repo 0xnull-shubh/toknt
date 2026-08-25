@@ -175,7 +175,10 @@ function buildPostToolUseHook(adaptersEntry: string): string {
   return `#!/usr/bin/env node
 /**
  * Tokn't Cursor postToolUse hook (stdin JSON → stdout JSON).
- * Compresses tool output and injects an optimized summary when Cursor allows it.
+ * Caches/stats optimizations quietly. Only rewrites model-visible output for MCP
+ * (updated_mcp_tool_output). Never injects additional_context — that stacks on
+ * top of the real tool result and adds tokens instead of saving them.
+ * Shell savings come from the preToolUse shell-wrap path.
  */
 import { pathToFileURL } from 'node:url';
 
@@ -228,6 +231,16 @@ try {
     process.exit(0);
   }
 
+  // Already compressed by shell-wrap — don't reprocess or spam context.
+  if (
+    content.includes('Full output stored locally.') ||
+    content.includes('[UNCHANGED FILE]') ||
+    content.startsWith('TEST RESULT')
+  ) {
+    process.stdout.write('{}\\n');
+    process.exit(0);
+  }
+
   const path =
     event.tool_input?.path ??
     event.tool_input?.file_path ??
@@ -242,33 +255,22 @@ try {
   });
 
   const meta = optimized.metadata?.toknt;
-  if (!meta?.optimized) {
-    process.stdout.write('{}\\n');
+  const isMcp =
+    typeof event.mcp_server_name === 'string' || String(toolName).startsWith('MCP:');
+
+  // Cursor only allows replacing MCP tool payloads. For everything else, stay silent.
+  if (meta?.optimized && isMcp) {
+    let updated;
+    try {
+      updated = JSON.parse(optimized.content);
+    } catch {
+      updated = { content: optimized.content, toknt: meta };
+    }
+    process.stdout.write(JSON.stringify({ updated_mcp_tool_output: updated }) + '\\n');
     process.exit(0);
   }
 
-  const response = {
-    additional_context:
-      '[Tokn\\'t] Compressed ' +
-      toolName +
-      ' output via ' +
-      (meta.strategy ?? 'optimize') +
-      '. Full content: ' +
-      (meta.recallUri ?? 'n/a') +
-      '\\n\\n' +
-      optimized.content,
-  };
-
-  // MCP tools can replace the payload the model sees.
-  if (typeof event.mcp_server_name === 'string' || String(toolName).startsWith('MCP:')) {
-    try {
-      response.updated_mcp_tool_output = JSON.parse(optimized.content);
-    } catch {
-      response.updated_mcp_tool_output = { content: optimized.content, toknt: meta };
-    }
-  }
-
-  process.stdout.write(JSON.stringify(response) + '\\n');
+  process.stdout.write('{}\\n');
 } catch (err) {
   process.stderr.write('[toknt] postToolUse hook error: ' + (err?.message ?? err) + '\\n');
   process.stdout.write('{}\\n');

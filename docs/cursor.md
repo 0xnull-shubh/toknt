@@ -24,7 +24,7 @@ Cursor hooks use the native stdin/stdout JSON protocol:
 | Hook | Behavior |
 |------|----------|
 | `preToolUse` (Shell) | In `balanced` / `aggressive` mode, wraps the shell command so stdout/stderr are compressed before the model sees them |
-| `postToolUse` | Runs the optimizer on tool output; injects `additional_context` when compression applies (and `updated_mcp_tool_output` for MCP tools) |
+| `postToolUse` | Quietly caches/stats optimizations; rewrites model-visible output only for MCP (`updated_mcp_tool_output`). Does **not** inject `additional_context` (that would stack on top of the real tool result) |
 
 Original content stays in `~/.toknt/` and can be recalled via `toknt://` URIs.
 
