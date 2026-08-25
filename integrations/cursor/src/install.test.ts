@@ -29,16 +29,20 @@ describe('CursorAdapter.install', () => {
 
     const hooks = JSON.parse(await readFile(join(tmpHome, '.cursor', 'hooks.json'), 'utf-8'));
     expect(hooks.version).toBe(1);
-    expect(hooks.hooks.postToolUse?.some((h: { command: string }) => h.command.includes('toknt/hooks'))).toBe(
+    expect(hooks.hooks.postToolUse?.some((h: { command: string }) => h.command.includes('toknt-'))).toBe(
       true
     );
-    expect(hooks.hooks.preToolUse?.some((h: { command: string }) => h.command.includes('toknt/hooks'))).toBe(
+    expect(hooks.hooks.preToolUse?.some((h: { command: string }) => h.command.includes('toknt-'))).toBe(
       true
     );
+    expect(
+      hooks.hooks.afterShellExecution?.some((h: { command: string }) => h.command.includes('toknt-'))
+    ).toBe(true);
 
-    await access(join(tmpHome, '.cursor', 'toknt', 'hooks', 'post-tool-use.mjs'));
-    await access(join(tmpHome, '.cursor', 'toknt', 'hooks', 'pre-tool-use.mjs'));
-    await access(join(tmpHome, '.cursor', 'toknt', 'hooks', 'shell-wrap.mjs'));
+    await access(join(tmpHome, '.cursor', 'hooks', 'toknt-post-tool-use.mjs'));
+    await access(join(tmpHome, '.cursor', 'hooks', 'toknt-pre-tool-use.mjs'));
+    await access(join(tmpHome, '.cursor', 'hooks', 'toknt-shell-wrap.mjs'));
+    await access(join(tmpHome, '.cursor', 'hooks', 'toknt-after-shell.mjs'));
     await access(join(tmpHome, '.cursor', 'plugins', 'toknt', 'toknt-plugin.json'));
 
     const tokntJson = JSON.parse(
@@ -74,5 +78,6 @@ describe('CursorAdapter.install', () => {
     expect(hooks.hooks.afterFileEdit).toHaveLength(1);
     expect(hooks.hooks.postToolUse ?? []).toHaveLength(0);
     expect(hooks.hooks.preToolUse ?? []).toHaveLength(0);
+    expect(hooks.hooks.afterShellExecution ?? []).toHaveLength(0);
   });
 });

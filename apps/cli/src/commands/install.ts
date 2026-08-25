@@ -120,7 +120,7 @@ export async function isInstalled(agent: string): Promise<boolean> {
     await readFile(join(getHookDir(agent), 'toknt.json'), 'utf-8');
     if (agent === 'cursor') {
       const hooks = await readFile(join(homedir(), '.cursor', 'hooks.json'), 'utf-8');
-      return hooks.includes('.cursor/toknt/hooks/');
+      return hooks.includes('toknt-') || hooks.includes('toknt/hooks');
     }
     return true;
   } catch {

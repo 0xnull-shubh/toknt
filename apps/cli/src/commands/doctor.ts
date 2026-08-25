@@ -45,11 +45,11 @@ export async function doctorCommand(): Promise<void> {
 
   try {
     const hooksRaw = await readFile(join(homedir(), '.cursor', 'hooks.json'), 'utf-8');
-    const wired = hooksRaw.includes('.cursor/toknt/hooks/');
+    const wired = hooksRaw.includes('toknt-') || hooksRaw.includes('toknt/hooks');
     checks.push({
       name: 'Cursor hooks.json',
       ok: wired,
-      detail: wired ? 'Tokn\'t postToolUse/preToolUse registered' : 'Missing Tokn\'t hook entries',
+      detail: wired ? 'Tokn\'t hooks registered' : 'Missing Tokn\'t hook entries',
     });
   } catch {
     checks.push({
